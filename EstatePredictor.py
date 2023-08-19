@@ -22,7 +22,7 @@ def predict_price(location,BHK,Parking,Area,Type,Transaction):
     X[1]=BHK
     X[2]=Parking
     return model.predict([X])[0]
-
+st.title("Welcome to Md Luqman Ali Bagwan Project")
 st.title("Real Estate Price Predictor for Delhi")
 nav = st.sidebar.radio("Navigation",["Home","Prediction"])
 if nav=="Home":
