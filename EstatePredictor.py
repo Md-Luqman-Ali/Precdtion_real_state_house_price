@@ -38,19 +38,20 @@ if nav=="Home":
    key='download-csv'
 )
 if nav=="Prediction":
-    column = []
-    for i in (data2.columns):
-          column.append(i)
-    column.append("Other")
-    loc = st.selectbox("Choose Your Location", column[9:])
+    column = x.columns.tolist()
+    locations = [name for name in column[9:] if name not in {"Apartment", "Builder_Floor", "New_Property", "Resale"}]
+    loc = st.selectbox("Choose Your Location", locations)
     BHK= st.slider("Enter BHK", 1,10,1)
     parking= st.number_input("Enter Number of Parking Area", min_value=1, max_value=5)
     area = st.number_input("Enter Area in Square Ft.", min_value=50, max_value=25000)
     type =st.radio("Type of Flat",["Apartment","Builder_Floor"])
     trans = st.radio("Type of Transaction",["Resale","New_Property"])
     if st.button("Predict"):
-        price = predict_price(loc,BHK,parking,area,type,trans)
-        st.write("## Rs. ",price )
+        try:
+            price = predict_price(loc, BHK, parking, area, type, trans)
+            st.write("## Rs. ", price)
+        except (IndexError, ValueError, KeyError) as exc:
+            st.error(f"Unable to predict for this selection: {exc}")
 
 
     
