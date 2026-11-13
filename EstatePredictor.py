@@ -7,58 +7,32 @@ data1 = pd.read_csv("Delhi House.csv")
 data2= pd.read_csv("processed_data.csv")
 x = pd.read_csv("x.csv")
 model = joblib.load("DecisionTreeReg.pkl")
-def predict_price(location,BHK,Parking,Area,Type,Transaction):
-    type_index = np.where(x.columns==Type)[0][0]
-    loc_index = np.where(x.columns==location)[0][0]
-    trans_index = np.where(x.columns==Transaction)[0][0]
-    X = np.zeros(len(x.columns))
-    if type_index>=0:
-        X[type_index]= 1
-    if loc_index>=0:
-        X[loc_index]= 1
-    if trans_index>=0:
-        X[trans_index]= 1
-    X[0]= Area
-    X[1]=BHK
-    X[2]=Parking
-    return model.predict([X])[0]
-st.title("Welcome to Md Luqman Ali Bagwan Project")
-st.title("Real Estate Price Predictor for Delhi")
-nav = st.sidebar.radio("Navigation",["Home","Prediction"])
-if nav=="Home":
-    img = Image.open("real.jpg")
-    st.image(img, width=800)
-    if st.checkbox("Show Dataframe Used to Train the Model"):
-        st.dataframe(data1)
-        st.download_button(
-   "Press to Download",
-   data1.to_csv(index=False).encode("utf-8"),
-   "estate.csv",
-   "text/csv",
-   key='download-csv'
-)
-if nav=="Prediction":
-    column = x.columns.tolist()
-    locations = [name for name in column[9:] if name not in {"Apartment", "Builder_Floor", "New_Property", "Resale"}]
-    loc = st.selectbox("Choose Your Location", locations)
-    BHK= st.slider("Enter BHK", 1,10,1)
-    parking= st.number_input("Enter Number of Parking Area", min_value=1, max_value=5)
-    area = st.number_input("Enter Area in Square Ft.", min_value=50, max_value=25000)
-    type =st.radio("Type of Flat",["Apartment","Builder_Floor"])
-    trans = st.radio("Type of Transaction",["Resale","New_Property"])
-    if st.button("Predict"):
-        try:
-            price = predict_price(loc, BHK, parking, area, type, trans)
-            st.write("## Rs. ", price)
-        except (IndexError, ValueError, KeyError) as exc:
-            st.error(f"Unable to predict for this selection: {exc}")
 
+if not x.columns.is_unique:
+    raise ValueError("Feature schema contains duplicate columns.")
 
-    
+expected_features = getattr(model, "n_features_in_", None)
+if expected_features is not None and expected_features != len(x.columns):
+    raise ValueError(
+        f"Model expects {expected_features} features, but x.csv contains {len(x.columns)}."
+    )
 
+model_feature_names = getattr(model, "feature_names_in_", None)
+if model_feature_names is not None and list(model_feature_names) != list(x.columns):
+    raise ValueError("Model feature names do not match x.csv column order.")
+def predict_price(location, BHK, Parking, Area, Type, Transaction):
+    required = [Type, Transaction, location]
+    missing = [name for name in required if name not in x.columns]
+    if missing:
+        raise ValueError(f"Unknown model features: {missing}")
 
+    X = np.zeros((1, len(x.columns)), dtype=float)
+    X[0, x.columns.get_loc("Area")] = Area
+    X[0, x.columns.get_loc("BHK")] = BHK
+    X[0, x.columns.get_loc("Parking")] = Parking
 
-    
-    
+    for name in required:
+        X[0, x.columns.get_loc(name)] = 1
 
+    return model.predict(X)[0]
 
