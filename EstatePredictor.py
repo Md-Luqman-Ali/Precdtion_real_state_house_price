@@ -1,38 +1,107 @@
-import streamlit as st
-from PIL import Image
-import pandas as pd
+"""Streamlit interface for Delhi residential price estimation."""
+
+from pathlib import Path
+
 import joblib
 import numpy as np
-data1 = pd.read_csv("Delhi House.csv")
-data2= pd.read_csv("processed_data.csv")
-x = pd.read_csv("x.csv")
-model = joblib.load("DecisionTreeReg.pkl")
+import pandas as pd
+import streamlit as st
 
-if not x.columns.is_unique:
-    raise ValueError("Feature schema contains duplicate columns.")
+ROOT = Path(__file__).resolve().parent
+SCHEMA_PATH = ROOT / "x.csv"
+MODEL_PATH = ROOT / "DecisionTreeReg.pkl"
 
-expected_features = getattr(model, "n_features_in_", None)
-if expected_features is not None and expected_features != len(x.columns):
-    raise ValueError(
-        f"Model expects {expected_features} features, but x.csv contains {len(x.columns)}."
-    )
 
-model_feature_names = getattr(model, "feature_names_in_", None)
-if model_feature_names is not None and list(model_feature_names) != list(x.columns):
-    raise ValueError("Model feature names do not match x.csv column order.")
-def predict_price(location, BHK, Parking, Area, Type, Transaction):
-    required = [Type, Transaction, location]
-    missing = [name for name in required if name not in x.columns]
+@st.cache_data
+def load_schema():
+    schema = pd.read_csv(SCHEMA_PATH)
+    if not schema.columns.is_unique:
+        raise ValueError("Feature schema contains duplicate columns.")
+    required = {"Area", "BHK", "Parking", "Apartment", "Builder_Floor", "New_Property", "Resale"}
+    missing = required.difference(schema.columns)
     if missing:
-        raise ValueError(f"Unknown model features: {missing}")
+        raise ValueError(f"x.csv is missing required columns: {sorted(missing)}")
+    if len(schema.columns) < 8:
+        raise ValueError("x.csv does not contain the expected location feature columns.")
+    return schema
 
-    X = np.zeros((1, len(x.columns)), dtype=float)
-    X[0, x.columns.get_loc("Area")] = Area
-    X[0, x.columns.get_loc("BHK")] = BHK
-    X[0, x.columns.get_loc("Parking")] = Parking
 
-    for name in required:
-        X[0, x.columns.get_loc(name)] = 1
+@st.cache_resource
+def load_model():
+    if not MODEL_PATH.is_file():
+        raise FileNotFoundError(f"Model artifact not found: {MODEL_PATH.name}")
+    return joblib.load(MODEL_PATH)
 
-    return model.predict(X)[0]
 
+def build_features(location, bhk, parking, area, property_type, transaction, columns):
+    """Build one model row in the exact order stored in x.csv."""
+    numeric = np.asarray([area, bhk, parking], dtype=float)
+    if not np.all(np.isfinite(numeric)) or np.any(numeric <= 0):
+        raise ValueError("Area, BHK and parking must be finite positive numbers.")
+    if location not in columns[7:]:
+        raise ValueError("Choose a location present in the model feature schema.")
+    if property_type not in ("Apartment", "Builder_Floor"):
+        raise ValueError("Choose a supported property type.")
+    if transaction not in ("New_Property", "Resale"):
+        raise ValueError("Choose a supported transaction type.")
+
+    row = np.zeros((1, len(columns)), dtype=float)
+    row[0, columns.index("Area")] = area
+    row[0, columns.index("BHK")] = bhk
+    row[0, columns.index("Parking")] = parking
+    for feature in (property_type, transaction, location):
+        row[0, columns.index(feature)] = 1.0
+    return row
+
+
+def predict_price(location, BHK, Parking, Area, Type, Transaction):
+    schema = load_schema()
+    columns = list(schema.columns)
+    model = load_model()
+    expected = getattr(model, "n_features_in_", None)
+    if expected is not None and expected != len(columns):
+        raise ValueError(f"Model expects {expected} features, but x.csv contains {len(columns)}.")
+    model_names = getattr(model, "feature_names_in_", None)
+    if model_names is not None and list(model_names) != columns:
+        raise ValueError("Model feature names do not match x.csv column order.")
+    features = build_features(location, BHK, Parking, Area, Type, Transaction, columns)
+    return float(model.predict(features)[0])
+
+
+st.set_page_config(page_title="Delhi House Price Predictor", page_icon="🏠", layout="centered")
+st.title("Delhi House Price Prediction")
+st.caption("Machine learning portfolio demo · Decision Tree Regressor")
+st.warning(
+    "Educational estimate only. The saved model's feature schema is reused from x.csv; "
+    "validate the original training pipeline and output units before making financial decisions."
+)
+
+try:
+    schema = load_schema()
+    locations = list(schema.columns[7:])
+except Exception as exc:
+    st.error(f"Could not load the feature schema: {exc}")
+    st.stop()
+
+with st.form("house_inputs"):
+    area = st.number_input("Area (as used in training data)", min_value=1.0, max_value=20000.0, value=1000.0, step=50.0)
+    left, right = st.columns(2)
+    with left:
+        bhk = st.number_input("BHK", min_value=1, max_value=10, value=2, step=1)
+        parking = st.number_input("Parking spaces", min_value=1, max_value=10, value=1, step=1)
+    with right:
+        property_type = st.selectbox("Property type", ["Apartment", "Builder_Floor"])
+        transaction = st.selectbox("Transaction", ["New_Property", "Resale"])
+    location = st.selectbox("Location", locations)
+    submitted = st.form_submit_button("Estimate price", type="primary", use_container_width=True)
+
+if submitted:
+    try:
+        estimate = predict_price(location, bhk, parking, area, property_type, transaction)
+        st.metric("Model estimate (training target units)", f"{estimate:,.2f}")
+        st.caption("The target unit is not labelled because it has not been independently confirmed from the training data.")
+    except (OSError, ValueError, AttributeError, TypeError) as exc:
+        st.error(f"Prediction could not be completed: {exc}")
+
+st.divider()
+st.caption("The prediction is generated by a saved Decision Tree model and is not a verified market valuation.")
